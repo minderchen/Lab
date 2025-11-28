@@ -1,0 +1,171 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>DeepSeek - LLM Hello World & Translation</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            background-color: #f7f9fc;
+        }
+    </style>
+</head>
+<body class="p-4 sm:p-8 min-h-screen flex items-start justify-center">
+    <div class="w-full max-w-2xl bg-white shadow-xl rounded-xl p-6 sm:p-10 border border-gray-100">
+        <h1 class="text-3xl font-bold text-gray-900 mb-4 border-b pb-2">
+            API "Hello World" (English & French)
+        </h1>
+        <p class="text-gray-600 mb-6">
+            This demo uses the Gemini API to generate a simple greeting and its French translation in a structured JSON format. This is the modern equivalent of a "Hello World" for generative models.
+        </p>
+
+        <div id="status-message" class="mb-4 text-sm font-medium text-gray-700">
+            Click the button to generate the greeting and translation.
+        </div>
+
+        <button id="generate-button"
+                class="w-full sm:w-auto px-6 py-3 bg-blue-600 text-white font-semibold rounded-lg shadow-md hover:bg-blue-700 transition duration-300 transform hover:scale-[1.01] focus:outline-none focus:ring-4 focus:ring-blue-500 focus:ring-opacity-50 disabled:bg-gray-400">
+            Generate Greeting & Translate
+        </button>
+
+        <!-- Output Card -->
+        <div id="output-card" class="mt-8 hidden bg-gray-50 p-6 rounded-lg border border-gray-200">
+            <h2 class="text-xl font-semibold text-gray-800 mb-4 flex items-center">
+                <svg class="w-6 h-6 mr-2 text-blue-600" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+                Model Output (Structured JSON)
+            </h2>
+            
+            <div class="space-y-4">
+                <!-- English Output -->
+                <div class="p-3 bg-white rounded-md shadow-sm border">
+                    <p class="text-xs font-medium text-gray-500 uppercase">English Greeting</p>
+                    <p id="english-output" class="text-lg font-bold text-gray-900 break-words"></p>
+                </div>
+                <!-- French Output -->
+                <div class="p-3 bg-white rounded-md shadow-sm border">
+                    <p class="text-xs font-medium text-gray-500 uppercase">French Translation</p>
+                    <p id="french-output" class="text-lg font-bold text-blue-700 break-words"></p>
+                </div>
+                <!-- JSON Source -->
+                <div class="pt-4 border-t border-gray-100">
+                    <p class="text-sm font-medium text-gray-700 mb-2">Raw JSON Response Structure:</p>
+                    <pre id="json-source" class="bg-gray-800 text-green-300 p-3 rounded-md overflow-x-auto text-xs whitespace-pre-wrap"></pre>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <script>
+        // --- Firebase Globals (Required for Canvas Environment, not used in this specific demo) ---
+        // const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        // const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : {};
+        // const initialAuthToken = typeof __initial_auth_token !== 'undefined' ? __initial_auth_token : '';
+        // -------------------------------------------------------------------------------------
+
+        document.getElementById('generate-button').addEventListener('click', async () => {
+            const button = document.getElementById('generate-button');
+            const statusMessage = document.getElementById('status-message');
+            const outputCard = document.getElementById('output-card');
+            const englishOutput = document.getElementById('english-output');
+            const frenchOutput = document.getElementById('french-output');
+            const jsonSource = document.getElementById('json-source');
+
+            // Reset UI
+            englishOutput.textContent = '';
+            frenchOutput.textContent = '';
+            jsonSource.textContent = '';
+            outputCard.classList.add('hidden');
+            statusMessage.textContent = 'Generating... Please wait.';
+            button.disabled = true;
+
+            const userPrompt = "Write a simple, friendly greeting in English, and then translate that exact greeting into French.";
+            const apiKey = ""; // Leave as empty string. The environment provides the key at runtime.
+            const apiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash-preview-09-2025:generateContent?key=${apiKey}`;
+
+            // Define the JSON schema for the structured response
+            const responseSchema = {
+                type: "OBJECT",
+                properties: {
+                    "english_greeting": { "type": "STRING", "description": "The friendly greeting written in English." },
+                    "french_greeting": { "type": "STRING", "description": "The exact translation of the greeting into French." }
+                },
+                propertyOrdering: ["english_greeting", "french_greeting"]
+            };
+
+            const payload = {
+                contents: [{ parts: [{ text: userPrompt }] }],
+                generationConfig: {
+                    responseMimeType: "application/json",
+                    responseSchema: responseSchema
+                },
+                // Use a system instruction to guide the model's behavior and tone
+                systemInstruction: {
+                    parts: [{ text: "You are a friendly and precise language assistant. Respond only with the requested JSON object." }]
+                },
+            };
+
+            // Implement exponential backoff for retries
+            const maxRetries = 5;
+            let result = null;
+
+            for (let i = 0; i < maxRetries; i++) {
+                try {
+                    const response = await fetch(apiUrl, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(payload)
+                    });
+
+                    if (!response.ok) {
+                        if (response.status === 429 && i < maxRetries - 1) {
+                            // Rate limit hit, apply exponential backoff
+                            const delay = Math.pow(2, i) * 1000 + Math.random() * 1000;
+                            await new Promise(resolve => setTimeout(resolve, delay));
+                            continue; // Retry
+                        }
+                        throw new Error(`API request failed with status ${response.status}`);
+                    }
+
+                    result = await response.json();
+                    break; // Success, break out of retry loop
+
+                } catch (error) {
+                    statusMessage.textContent = `Error: ${error.message}. Check console for details.`;
+                    console.error('API Call Error:', error);
+                    button.disabled = false;
+                    return;
+                }
+            }
+
+            // Process the successful (non-null) result
+            if (result) {
+                try {
+                    const candidate = result.candidates?.[0];
+                    if (candidate && candidate.content?.parts?.[0]?.text) {
+                        const jsonText = candidate.content.parts[0].text;
+                        const parsedJson = JSON.parse(jsonText);
+
+                        englishOutput.textContent = parsedJson.english_greeting || "Error: Greeting not found.";
+                        frenchOutput.textContent = parsedJson.french_greeting || "Error: Translation not found.";
+                        jsonSource.textContent = JSON.stringify(parsedJson, null, 2);
+                        outputCard.classList.remove('hidden');
+                        statusMessage.textContent = 'Successfully generated and translated the greeting!';
+                    } else {
+                        statusMessage.textContent = 'Generation failed: Model response was empty or malformed.';
+                        console.error('Malformed API Response:', result);
+                    }
+                } catch (e) {
+                    statusMessage.textContent = 'Failed to parse JSON response. Check console for details.';
+                    console.error('Parsing Error:', e);
+                }
+            }
+
+            button.disabled = false;
+        });
+    </script>
+</body>
+</html>
